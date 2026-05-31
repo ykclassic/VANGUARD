@@ -17,15 +17,12 @@
     "intervals": [
       "15m",
       "1h",
-      "4h"
+      "4h",
+      "1d"
     ]
   },
   "consensus_engine": {
-    "strict_mode": true,
-    "required_macro_alignment": [
-      "1h",
-      "4h"
-    ]
+    "strict_mode": true
   },
   "risk_management": {
     "atr_period": 14,
@@ -33,9 +30,20 @@
     "tp1_multiplier": 1.0,
     "tp2_multiplier": 2.0
   },
+  "nexus_tier": {
+    "adx_period": 14,
+    "adx_trending_threshold": 25
+  },
+  "vanguard_tier": {
+    "ai_lookback_period": 50,
+    "ai_projection_steps": 6
+  },
   "bridge": {
     "discord_webhook_env_key": "DISCORD_WEBHOOK_URL",
-    "embed_color_bullish": "0x00FF00",
-    "embed_color_bearish": "0xFF0000"
+    "embed_color_diamond": "0x00FFFF",
+    "embed_color_silver": "0xC0C0C0",
+    "embed_color_gold": "0xFFD700",
+    "embed_color_tp": "0x00FF00",
+    "embed_color_sl": "0xFF0000"
   }
 }
