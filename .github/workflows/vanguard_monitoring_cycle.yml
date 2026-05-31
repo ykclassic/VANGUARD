@@ -1,4 +1,4 @@
-name: ProfitForge Automated Market Cycle
+name: ProfitForge Automated Monitor
 
 on:
   schedule:
