@@ -18,7 +18,6 @@ except FileNotFoundError:
     exit(1)
 
 def format_price(val):
-    """Truncates decimal float values dynamically for clean UI representation."""
     if val >= 1:
         return f"{val:,.2f}"
     return f"{val:,.6f}"
@@ -34,10 +33,9 @@ async def process_queue():
         return
 
     client_id = CONFIG.get('client_id', 'Unknown Client')
-    strict_mode = CONFIG['consensus_engine'].get('strict_mode', True)
 
     async with aiosqlite.connect('signals.db', timeout=10.0) as db:
-        async with db.execute("SELECT id, symbol, direction, price, stop_loss, take_profit_1, take_profit_2, indicators_triggered FROM alerts WHERE is_sent = 0") as cursor:
+        async with db.execute("SELECT id, symbol, direction, price, stop_loss, take_profit_1, take_profit_2, indicators_triggered, tier, market_regime, trading_session, ai_prediction FROM alerts WHERE is_sent = 0 AND status = 'ACTIVE'") as cursor:
             unsent_alerts = await cursor.fetchall()
             
         if not unsent_alerts:
@@ -45,21 +43,24 @@ async def process_queue():
 
         async with aiohttp.ClientSession() as session:
             for alert in unsent_alerts:
-                alert_id, symbol, direction, price, stop_loss, tp1, tp2, indicators = alert
+                alert_id, symbol, direction, price, stop_loss, tp1, tp2, indicators, tier, regime, session_name, ai_prediction = alert
                 
-                # Theme alignment based on signal intent
-                if direction == "LONG":
-                    color_hex = CONFIG['bridge']['embed_color_bullish']
-                    title = f"🟢 STRICT CONSENSUS MET: {symbol.upper().replace('_', '/')}"
-                    dir_text = "📈 LONG (Bullish)"
-                else:
-                    color_hex = CONFIG['bridge']['embed_color_bearish']
-                    title = f"🔴 STRICT CONSENSUS MET: {symbol.upper().replace('_', '/')}"
-                    dir_text = "📉 SHORT (Bearish)"
+                fmt_symbol = symbol.upper().replace('_', '/')
+                dir_text = "📈 LONG (Bullish)" if direction == "LONG" else "📉 SHORT (Bearish)"
                 
-                decimal_color = int(color_hex, 16)
+                tier_icons = {"DIAMOND": "💎", "SILVER": "🥈", "GOLD": "🥇"}
+                tier_colors = {
+                    "DIAMOND": CONFIG['bridge']['embed_color_diamond'],
+                    "SILVER": CONFIG['bridge']['embed_color_silver'],
+                    "GOLD": CONFIG['bridge']['embed_color_gold']
+                }
                 
-                # Payload construction matching exact structural specifications
+                icon = tier_icons.get(tier, "🟢")
+                hex_color = tier_colors.get(tier, "0x00FF00")
+                decimal_color = int(hex_color, 16)
+                
+                title = f"{icon} {tier} CONSENSUS: {fmt_symbol}"
+                
                 payload = {
                     "embeds": [
                         {
@@ -77,27 +78,34 @@ async def process_queue():
                                     "inline": True
                                 },
                                 {
-                                    "name": "🎯 Trade Parameters (ATR-Adjusted)",
+                                    "name": "🎯 Trade Parameters (ATR)",
                                     "value": f"**Take Profit 2:** ${format_price(tp2)}\n**Take Profit 1:** ${format_price(tp1)}\n**Stop Loss:** ${format_price(stop_loss)}"
                                 },
                                 {
-                                    "name": "📊 Indicator Matrix Alignment",
+                                    "name": "🌐 Market Context (NEXUS)",
+                                    "value": f"**Regime:** {regime}\n**Active Session:** {session_name}"
+                                },
+                                {
+                                    "name": "🧠 VANGUARD AI Projection",
+                                    "value": f"**Predicted Target:** ${format_price(ai_prediction)}"
+                                },
+                                {
+                                    "name": "📊 AEGIS Matrix Alignment",
                                     "value": indicators
                                 }
                             ],
                             "footer": {
-                                "text": f"Client ID: {client_id} | Strict Mode: {strict_mode}"
+                                "text": f"Client ID: {client_id} | Tier: VANGUARD Architecture Active"
                             }
                         }
                     ]
                 }
                 
-                # Network transmission with back-off handling wrapper
                 async with session.post(webhook_url, json=payload) as response:
                     if response.status in [200, 204]:
                         await db.execute("UPDATE alerts SET is_sent = 1 WHERE id = ?", (alert_id,))
                         await db.commit()
-                        logging.info(f"Dispatched webhook for {symbol} ({direction})")
+                        logging.info(f"Dispatched webhook for {symbol} ({direction} - {tier})")
                     elif response.status == 429:
                         logging.warning("Discord Rate Limit Hit. Queuing remainder for next cycle.")
                         break
