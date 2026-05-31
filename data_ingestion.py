@@ -6,12 +6,10 @@ import aiohttp
 import aiosqlite
 from dotenv import load_dotenv
 
-# Configure logging for production-grade observability
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 load_dotenv()
 
-# Load configuration dynamically
 try:
     with open('config.json', 'r') as f:
         CONFIG = json.load(f)
@@ -22,7 +20,6 @@ except FileNotFoundError:
 XT_API_BASE_URL = os.getenv("XT_API_BASE_URL", CONFIG['data_ingestion']['exchange_url'])
 
 async def init_db():
-    """Initializes the database schema with automatic state migrations for new features."""
     async with aiosqlite.connect('signals.db', timeout=10.0) as db:
         await db.execute('''
             CREATE TABLE IF NOT EXISTS market_data (
@@ -48,26 +45,45 @@ async def init_db():
                 take_profit_1 REAL DEFAULT 0.0,
                 take_profit_2 REAL DEFAULT 0.0,
                 indicators_triggered TEXT NOT NULL,
+                tier TEXT DEFAULT 'FREE',
+                market_regime TEXT DEFAULT 'UNKNOWN',
+                trading_session TEXT DEFAULT 'UNKNOWN',
+                ai_prediction REAL DEFAULT 0.0,
+                status TEXT DEFAULT 'ACTIVE',
                 timestamp INTEGER NOT NULL,
                 is_sent INTEGER DEFAULT 0
             )
         ''')
         
-        # Schema Migration: Add new risk columns if they don't exist in an older database
         cursor = await db.execute("PRAGMA table_info(alerts)")
         columns = [row[1] for row in await cursor.fetchall()]
+        
+        migrations_executed = False
         if 'price' not in columns:
             await db.execute("ALTER TABLE alerts ADD COLUMN price REAL DEFAULT 0.0")
             await db.execute("ALTER TABLE alerts ADD COLUMN stop_loss REAL DEFAULT 0.0")
             await db.execute("ALTER TABLE alerts ADD COLUMN take_profit_1 REAL DEFAULT 0.0")
             await db.execute("ALTER TABLE alerts ADD COLUMN take_profit_2 REAL DEFAULT 0.0")
-            logging.info("Database schema migrated: Added ATR risk management columns.")
+            migrations_executed = True
+        if 'tier' not in columns:
+            await db.execute("ALTER TABLE alerts ADD COLUMN tier TEXT DEFAULT 'FREE'")
+            migrations_executed = True
+        if 'market_regime' not in columns:
+            await db.execute("ALTER TABLE alerts ADD COLUMN market_regime TEXT DEFAULT 'UNKNOWN'")
+            await db.execute("ALTER TABLE alerts ADD COLUMN trading_session TEXT DEFAULT 'UNKNOWN'")
+            migrations_executed = True
+        if 'ai_prediction' not in columns:
+            await db.execute("ALTER TABLE alerts ADD COLUMN ai_prediction REAL DEFAULT 0.0")
+            await db.execute("ALTER TABLE alerts ADD COLUMN status TEXT DEFAULT 'ACTIVE'")
+            migrations_executed = True
+            
+        if migrations_executed:
+            logging.info("Database schema migrated: Synchronized with VANGUARD architecture.")
 
         await db.commit()
         logging.info("Database 'signals.db' initialized.")
 
 async def fetch_xt_market_data(session: aiohttp.ClientSession, symbol: str, interval: str) -> list:
-    """Fetches and extracts the kline record list from the XT.com v4 API envelope."""
     endpoint = f"{XT_API_BASE_URL}/v4/public/kline"
     params = {"symbol": symbol, "interval": interval}
     
@@ -89,7 +105,6 @@ async def fetch_xt_market_data(session: aiohttp.ClientSession, symbol: str, inte
         return []
 
 async def ingest_and_sanitize(symbol: str, interval: str):
-    """Parses dictionary candle data and performs safe database insertion."""
     async with aiohttp.ClientSession() as session:
         records = await fetch_xt_market_data(session, symbol, interval)
         
