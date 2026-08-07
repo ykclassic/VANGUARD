@@ -90,7 +90,7 @@ jobs:
           if ! git diff --staged --quiet; then
             git commit -m "chore: automated database update [skip ci]"
             git pull --rebase origin main
-            git push
+            git push origin main
           else
             echo "No database state changes to commit."
           fi
