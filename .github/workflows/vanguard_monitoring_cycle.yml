@@ -1,191 +1,96 @@
 name: ProfitForge Automated Monitor
 
-
-
 on:
-
   schedule:
-
     - cron: "*/15 * * * *" 
-
   push:
-
     branches: [ "main" ]
-
   workflow_dispatch:
 
-
-
 permissions:
-
   contents: write
 
-
-
 concurrency: 
-
   group: market-cycle
-
   cancel-in-progress: false
 
-
-
 jobs:
-
   security_audit:
-
     name: Static Analysis & Security Check
-
     runs-on: ubuntu-latest
-
     steps:
-
       - name: Checkout Code
-
         uses: actions/checkout@v4
 
-
-
       - name: Set up Python
-
         uses: actions/setup-python@v5
-
         with:
-
           python-version: '3.10'
-
-
 
       - name: Install Security Tools
-
         run: |
-
           python -m pip install --upgrade pip
-
           pip install flake8==7.1.1 bandit==1.7.7
 
-
-
       - name: Linting (Syntax & Readability)
-
         run: |
-
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
 
-
-
       - name: OWASP Vulnerability Scan (Bandit)
-
         run: |
-
           bandit -r . -ll -ii -c "bandit.yml" || echo "Bandit scan completed."
 
-
-
   execution_and_state_sync:
-
     name: Signal Pipeline & DB Sync
-
     needs: security_audit
-
     runs-on: ubuntu-latest
-
     steps:
-
       - name: Checkout Code
-
         uses: actions/checkout@v4
-
         with:
-
           token: ${{ secrets.GITHUB_TOKEN }}
-
           fetch-depth: 0 
 
-
-
       - name: Set up Python
-
         uses: actions/setup-python@v5
-
         with:
-
           python-version: '3.10'
-
           cache: 'pip'
 
-
-
       - name: Install Project Dependencies
-
         run: |
-
           python -m pip install --upgrade pip
-
           # Ensure numpy is present for VANGUARD AI prediction module
-
           pip install -r requirements.txt numpy
 
-
-
       - name: Step 1 - Ingest Market Data
-
         env:
-
           XT_API_BASE_URL: ${{ secrets.XT_API_BASE_URL }}
-
         run: python data_ingestion.py
 
-
-
       - name: Step 2 - Calculate Multi-Timeframe Consensus
-
         run: python consensus_engine.py
 
-
-
       - name: Step 3 - Bridge Rich Signals to Discord
-
         env:
-
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-
         run: python discord_bridge.py
-
         
-
       - name: Step 4 - VANGUARD Live Trade Monitor
-
         env:
-
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-
         run: python vanguard_monitor.py
 
-
-
       - name: Step 5 - Preserve State (Database Sync)
-
         run: |
-
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
-
           git config --local user.name "github-actions[bot]"
-
           git add signals.db
-
           
-
           if ! git diff --staged --quiet; then
-
             git commit -m "chore: automated database update [skip ci]"
-
             git pull --rebase origin main
-
             git push
-
           else
-
             echo "No database state changes to commit."
-
           fi
