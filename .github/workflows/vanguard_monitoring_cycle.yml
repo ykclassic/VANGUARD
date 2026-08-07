@@ -50,6 +50,8 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0 
+          # CRITICAL FIX: Forces checkout of the latest commit at execution time, preventing queue-staleness
+          ref: main 
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -89,7 +91,10 @@ jobs:
           
           if ! git diff --staged --quiet; then
             git commit -m "chore: automated database update [skip ci]"
-            git pull --rebase origin main
+            
+            # CRITICAL FIX: Pull with rebase, using '-X theirs' to force local binary file to win on conflict
+            git pull --rebase -X theirs origin main
+            
             git push origin main
           else
             echo "No database state changes to commit."
