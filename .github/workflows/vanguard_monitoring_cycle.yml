@@ -1,4 +1,4 @@
-Vanguard Automated Monitor
+name: Vanguard Automated Monitor
 
 on:
   schedule:
