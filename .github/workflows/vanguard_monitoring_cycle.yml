@@ -82,18 +82,18 @@ jobs:
         run: python vanguard_monitor.py
 
       - name: Step 5 - Preserve State (Database Sync)
-        if: always()  # Guarantees the database state is synchronized even if a previous step generates a soft fail
+        if: always()
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add signals.db
           
-          if ! git diff --staged --quiet; then
+          # CRITICAL FIX: Force add bypasses .gitignore blocking the .db file
+          git add --force signals.db
+          
+          # CRITICAL FIX: Porcelain check accurately determines if binary file was modified
+          if git status --porcelain | grep -q "signals.db"; then
             git commit -m "chore: automated database update [skip ci]"
-            
-            # Using '-X ours' during rebase prioritizes local binary file changes over upstream staleness
             git pull --rebase -X ours origin main
-            
             git push origin main
           else
             echo "No database state changes to commit."
