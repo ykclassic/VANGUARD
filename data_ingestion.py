@@ -17,7 +17,8 @@ except FileNotFoundError:
     logging.critical("config.json not found. Execution halted.")
     exit(1)
 
-XT_API_BASE_URL = os.getenv("XT_API_BASE_URL", CONFIG['data_ingestion']['exchange_url'])
+# Enforce XT.com V4 Spot API endpoint directly, stripping trailing slashes to prevent 404 pathing errors
+XT_API_BASE_URL = os.getenv("XT_API_BASE_URL", "https://sapi.xt.com").rstrip('/')
 
 async def init_db():
     async with aiosqlite.connect('signals.db', timeout=10.0) as db:
@@ -87,63 +88,78 @@ async def fetch_xt_market_data(session: aiohttp.ClientSession, symbol: str, inte
     endpoint = f"{XT_API_BASE_URL}/v4/public/kline"
     params = {"symbol": symbol, "interval": interval}
     
-    try:
-        async with session.get(endpoint, params=params) as response:
-            if response.status == 200:
-                payload = await response.json()
-                records = payload.get("result", [])
-                if isinstance(records, list):
-                    return records
+    max_retries = 3
+    base_delay = 2
+    
+    for attempt in range(max_retries):
+        try:
+            async with session.get(endpoint, params=params) as response:
+                if response.status == 200:
+                    payload = await response.json()
+                    records = payload.get("result", [])
+                    if isinstance(records, list):
+                        return records
+                    else:
+                        logging.error(f"Unexpected response structure for {symbol}: {payload}")
+                        return []
+                elif response.status == 429 or response.status >= 500:
+                    delay = base_delay * (2 ** attempt)
+                    logging.warning(f"HTTP {response.status} for {symbol}. Retrying in {delay}s...")
+                    await asyncio.sleep(delay)
+                    continue
                 else:
-                    logging.error(f"Unexpected response structure for {symbol}: {payload}")
+                    logging.error(f"HTTP {response.status}: Fetch failed for {symbol} at {endpoint}.")
                     return []
-            else:
-                logging.error(f"HTTP {response.status}: Fetch failed for {symbol}.")
-                return []
-    except Exception as e:
-        logging.error(f"Network error during data fetch: {e}")
-        return []
-
-async def ingest_and_sanitize(symbol: str, interval: str):
-    async with aiohttp.ClientSession() as session:
-        records = await fetch_xt_market_data(session, symbol, interval)
-        
-        if not records:
-            return
-
-        async with aiosqlite.connect('signals.db', timeout=10.0) as db:
-            for candle in records:
-                if not isinstance(candle, dict) or 't' not in candle:
-                    logging.warning(f"Skipping malformed candle: {candle}")
-                    continue
-                
-                try:
-                    timestamp = int(candle['t'])
-                    open_price = float(candle['o'])
-                    high_price = float(candle['h'])
-                    low_price = float(candle['l'])
-                    close_price = float(candle['c'])
-                    volume = float(candle['q']) 
-                    
-                    await db.execute('''
-                        INSERT OR IGNORE INTO market_data 
-                        (symbol, interval, timestamp, open, high, low, close, volume)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (symbol, interval, timestamp, open_price, high_price, low_price, close_price, volume))
-                except (ValueError, TypeError, KeyError) as e:
-                    logging.warning(f"Sanitization error for {symbol}: {e} | Candle data: {candle}")
-                    continue
+        except Exception as e:
+            delay = base_delay * (2 ** attempt)
+            logging.error(f"Network error during data fetch for {symbol}: {e}. Retrying in {delay}s...")
+            await asyncio.sleep(delay)
             
-            await db.commit()
-            logging.info(f"Ingested {len(records)} records for {symbol} ({interval}).")
+    logging.error(f"Failed to fetch {symbol} after {max_retries} attempts.")
+    return []
+
+async def ingest_and_sanitize(session: aiohttp.ClientSession, symbol: str, interval: str):
+    # Pass the established HTTP pool session downstream instead of instantiating anew
+    records = await fetch_xt_market_data(session, symbol, interval)
+    
+    if not records:
+        return
+
+    async with aiosqlite.connect('signals.db', timeout=10.0) as db:
+        for candle in records:
+            if not isinstance(candle, dict) or 't' not in candle:
+                logging.warning(f"Skipping malformed candle: {candle}")
+                continue
+            
+            try:
+                timestamp = int(candle['t'])
+                open_price = float(candle['o'])
+                high_price = float(candle['h'])
+                low_price = float(candle['l'])
+                close_price = float(candle['c'])
+                volume = float(candle['q']) 
+                
+                await db.execute('''
+                    INSERT OR IGNORE INTO market_data 
+                    (symbol, interval, timestamp, open, high, low, close, volume)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (symbol, interval, timestamp, open_price, high_price, low_price, close_price, volume))
+            except (ValueError, TypeError, KeyError) as e:
+                logging.warning(f"Sanitization error for {symbol}: {e} | Candle data: {candle}")
+                continue
+        
+        await db.commit()
+        logging.info(f"Ingested {len(records)} records for {symbol} ({interval}).")
 
 async def main():
     await init_db()
     symbols = CONFIG['data_ingestion']['symbols']
     intervals = CONFIG['data_ingestion']['intervals']
     
-    tasks = [ingest_and_sanitize(sym, ivl) for sym in symbols for ivl in intervals]
-    await asyncio.gather(*tasks)
+    # Establish a single persistent HTTP session for connection pooling across all concurrent operations
+    async with aiohttp.ClientSession() as session:
+        tasks = [ingest_and_sanitize(session, sym, ivl) for sym in symbols for ivl in intervals]
+        await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
     asyncio.run(main())
