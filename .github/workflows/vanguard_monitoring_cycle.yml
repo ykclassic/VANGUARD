@@ -1,4 +1,4 @@
-name: ProfitForge Automated Monitor
+Vanguard Automated Monitor
 
 on:
   schedule:
@@ -50,7 +50,6 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0 
-          # CRITICAL FIX: Forces checkout of the latest commit at execution time, preventing queue-staleness
           ref: main 
 
       - name: Set up Python
@@ -62,7 +61,6 @@ jobs:
       - name: Install Project Dependencies
         run: |
           python -m pip install --upgrade pip
-          # Ensure numpy is present for VANGUARD AI prediction module
           pip install -r requirements.txt numpy
 
       - name: Step 1 - Ingest Market Data
@@ -84,6 +82,7 @@ jobs:
         run: python vanguard_monitor.py
 
       - name: Step 5 - Preserve State (Database Sync)
+        if: always()  # Guarantees the database state is synchronized even if a previous step generates a soft fail
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
@@ -92,8 +91,8 @@ jobs:
           if ! git diff --staged --quiet; then
             git commit -m "chore: automated database update [skip ci]"
             
-            # CRITICAL FIX: Pull with rebase, using '-X theirs' to force local binary file to win on conflict
-            git pull --rebase -X theirs origin main
+            # Using '-X ours' during rebase prioritizes local binary file changes over upstream staleness
+            git pull --rebase -X ours origin main
             
             git push origin main
           else
