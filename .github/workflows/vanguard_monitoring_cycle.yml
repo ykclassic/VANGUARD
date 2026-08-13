@@ -87,14 +87,30 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          # Stage the database file explicitly using absolute root path tracking
-          git add -f Signal.db
-          
-          # Check if there are actual staged changes to commit
-          if git diff --staged --quiet; then
-            echo "No database state changes to commit."
+          # Check and locate the database file dynamically in case of casing differences or creation lag
+          DB_FILE=""
+          if [ -f "Signal.db" ]; then
+            DB_FILE="Signal.db"
+          elif [ -f "signal.db" ]; then
+            DB_FILE="signal.db"
           else
-            git commit -m "chore: automated database update [skip ci]"
-            git pull --rebase origin main || git rebase --abort
-            git push origin main
+            # Find any .db file created in the root directory
+            DB_FILE=$(find . -maxdepth 1 -name "*.db" | head -n 1)
+          fi
+          
+          if [ -n "$DB_FILE" ] && [ -f "$DB_FILE" ]; then
+            echo "Found database file: $DB_FILE"
+            git add -f "$DB_FILE"
+            
+            # Check if there are actual staged changes to commit
+            if git diff --staged --quiet; then
+              echo "No database state changes to commit."
+            else
+              git commit -m "chore: automated database update [skip ci]"
+              git pull --rebase origin main || git rebase --abort
+              git push origin main
+            fi
+          else
+            echo "Error: Database file not found in the workspace root."
+            exit 1
           fi
