@@ -1,4 +1,4 @@
-name: Vanguard Automated Monitor
+Name: Vanguard Automated Monitor
 
 on:
   schedule:
@@ -87,14 +87,14 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          # CRITICAL FIX: Force add bypasses .gitignore blocking the .db file
-          git add --force signals.db
+          # Stage the database file explicitly
+          git add -f signals.db
           
-          # CRITICAL FIX: Porcelain check accurately determines if binary file was modified
-          if git status --porcelain | grep -q "signals.db"; then
-            git commit -m "chore: automated database update [skip ci]"
-            git pull --rebase -X ours origin main
-            git push origin main
-          else
+          # Check if there are actual staged changes to commit
+          if git diff --staged --quiet; then
             echo "No database state changes to commit."
+          else
+            git commit -m "chore: automated database update [skip ci]"
+            git pull --rebase origin main || git rebase --abort
+            git push origin main
           fi
