@@ -1,4 +1,4 @@
-Name: Vanguard Automated Monitor
+name: Vanguard Automated Monitor
 
 on:
   schedule:
@@ -87,8 +87,8 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          # Stage the database file explicitly
-          git add -f signals.db
+          # Stage the database file explicitly using absolute root path tracking
+          git add -f Signal.db
           
           # Check if there are actual staged changes to commit
           if git diff --staged --quiet; then
